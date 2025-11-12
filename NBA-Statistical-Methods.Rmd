@@ -1,0 +1,485 @@
+---
+title: "Analyzing NBA Games Using ML Techniques"
+author: "Adam White"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    source_code: embed
+    theme: united
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(kableExtra)
+library(dplyr)
+library(ggplot2)
+library(teamcolors)
+library(knitr) # I recommend doing this here
+library(olsrr)
+library(ggplot2)
+library(leaps)
+library(faraway)
+library(GGally)
+library(car)
+library(readxl)
+library(olsrr)
+library(robustbase)
+library(splines)
+library(FNN)
+library(gmodels)
+library(caret)
+library(kknn)
+library(gmodels)
+library(dplyr)
+library(sjPlot)
+library(sjlabelled)
+library(sjmisc)
+library(readxl)
+
+nba = read_xlsx("/Users/Adam/Downloads/4214_data.xlsx")
+colnames(nba) <- c("Team", "Matchup", "Game Date", "Win or Loss", "MIN", "PTS", "FGM", "FGA", "FGP", "3PM", "3PA", "3PP", "FTM", "FTA", "FTP", "OREB", "DREB", "REB", "AST", "STL", "BLK", "TOV", "PF", "Plus Minus")
+nba$Team <- factor(nba$Team, levels = unique(nba$Team))
+```
+
+
+Data Summary
+=====================================
+Column {data-width=450}
+-----------------------------------------------------------------------
+### Data Description {data-height=130}
+The data set I worked with is box scores from NBA games from the 2021-2022 NBA season. This data was retrieved from NBA.com and has 24 columns and 2461 rows. Each row of the dataset is a team's performance for a given game, meaning that each game has two rows, one for each team. 
+
+https://docs.google.com/spreadsheets/d/1FcJVyAggt7qLm3J-gh1_cReJeQn_8jOQd77BaDY3crE/edit?usp=sharing
+```{r}
+
+```
+
+```{r data_dictionary}
+x <- data.frame(colnames(nba), c("String", "String", "String", "Boolean", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double", "Double"), c("Team who's data is shown", "Teams playing in the game", "Date of the game", "If the team won or lost", "Length of game play (minutes)", "Points scored", "Field goals made", "Field goals attempted", "Field goal percentage", "3 pointers made", "3 pointers attempted", "3 point percentage", "Free throws made", "Free throws attempted", "Free throw percentage", "Offensive rebounds", "Defensive rebounds", "Total rebounds", "Assists", "Steals", "Blocks", "Turnovers", "Personal fouls", "Team Plus-Minus"))
+names(x) <- c("Column", "Data Type", "Description")
+kable(x)
+```
+
+Column {data-width=1550}
+-----------------------------------------------------------------------
+### Sample Data
+```{r table_of_data}
+kable(nba[1:13,]) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+
+Column
+-----------------------------------------------------------------------
+### Team Wins
+```{r barplot_team_wins}
+nba$`Win or Loss` <- c("W" = 1, "L" = 0)[nba$`Win or Loss`]
+tm_wins <- nba %>%
+  group_by(Team) %>%
+  summarize(Wins = sum(`Win or Loss`)) 
+library(plotly)
+
+ggplotly(ggplot(tm_wins, aes(Wins, Team, fill = Team)) +
+  geom_bar(stat="identity") + 
+  scale_fill_manual(values = c("ATL" = "#e13a3e", "BKN" = "#061922", "BOS" = "#008348", "CHA" = "#006bb6", "CHI" = "#ce1141", "CLE" = "#860038", "DAL" = "#007dc5", "DEN" = "#4d90cd", "DET" = "#ed174c", "GSW" = "#fdb927", "HOU" = "#ce1141", "IND" = "#ffc633", "LAC" = "#ed174c", "LAL" = "#fdb927", "MEM" = "#0f586c", "MIA" = "#98002e", "MIL" = "#00471b", "MIN" = "#005083", "NOP" = "#002b5c", "NYK" = "#006bb6", "OKC" = "#007dc3", "ORL" = "#007dc5", "PHI" = "#ed174c", "PHX" = "#e56020", "POR" = "#e03a3e", "SAC" = "#724c9f", "SAS" = "#bac3c9", "TOR" = "#ce1141", "UTA" = "#002b5c", "WAS" = "#002b5c")
+)+
+  theme_bw() +
+  theme(legend.position = "none"))
+```
+Logistic Regression
+=====================================
+Column {data-width=250}
+-----------------------------------------------------------------------
+### Logistic Regression
+
+I wanted to ask myself "What variables specifically are the most impactful for deciding a teams winning probability?" and what specific values of our variables would we predict a win vs a loss from.
+
+Logistic regression is a great method for prediction between two states, so I used it to predict whether a team won or lost a game. We used the same variables as our NaiveBayes model which are points, 3 point makes, defensive rebounds, steals, blocks, and turnovers to predict wins and losses.
+
+
+Shown in the plots on the right is a logistic regression fit of the four most significant variables (points, defensive rebounds, steals, and turnovers) to wins. The strongest predictors are points and defensive rebounds as clearly shown in their logistic regression plots. At and above 110 points scored, teams are more likely to win than lose. Above 34 defensive rebounds, winning percentage is above 0.5. The slope of the logistic fit for steals is far more consistent than that of points and defensive rebounds. This is because having a lot of steals is less impact on the outcome of the game than the other two categories. Turnovers are similar to steals in that they have a lesser impact on the outcome of the game than the other two, however it is the only fit with a negative slope. All four plots are as expected and do a great job of showing which variables are most important to winning and what values teams should aim for.
+
+Row
+-----------------------------------------------------------------------
+### Points
+```{r Logistic_Regression}
+nba$`Win or Loss` <- as.numeric(factor(nba$`Win or Loss`, levels = unique(nba$`Win or Loss`)))-1
+nba$WL <- factor(nba$`Win or Loss`, levels = unique(nba$`Win or Loss`))
+modelfit <- glm(`Win or Loss` ~ PTS + `3PM` + DREB + STL + BLK + TOV, data = nba, family = binomial)
+
+ggplotly(ggplot(nba, aes(x = PTS, y = `Win or Loss`)) +
+  geom_point(aes(color = WL), position = position_jitter(height = 0.03, width = 0)) +
+  geom_smooth(method = "glm", method.args = list(family="binomial")) +
+  scale_color_manual(name = "Win or Loss", values = c("#861F41", "#E87722")) +
+  labs(title = "Logistic Regression Fit to Wins by Points",
+       x = "Points",
+       y = "P(Win)") +
+  theme_bw())
+```
+
+### Defensive Rebounds
+```{r lo}
+ggplotly(ggplot(nba, aes(x = DREB, y = `Win or Loss`)) +
+  geom_point(aes(color = WL), position = position_jitter(height = 0.03, width = 0)) +
+  geom_smooth(method = "glm", method.args = list(family="binomial")) +
+  scale_color_manual(name = "Win or Loss", values = c("#861F41", "#E87722")) +
+  labs(title = "Logistic Regression Fit to Wins by Defensive Rebounds",
+       x = "Defensive Rebounds",
+       y = "P(Win)") +
+  theme_bw())
+```
+
+Row
+-----------------------------------------------------------------------
+### Steals
+```{r log_reg_2}
+ggplotly(ggplot(nba, aes(x = STL, y = `Win or Loss`)) +
+  geom_point(aes(color = WL), position = position_jitter(height = 0.03, width = 0)) +
+  geom_smooth(method = "glm", method.args = list(family="binomial")) +
+  scale_color_manual(name = "Win or Loss", values = c("#861F41", "#E87722")) +
+  labs(title = "Logistic Regression Fit to Wins by Steals",
+       x = "Steals",
+       y = "P(Win)") +
+  theme_bw())
+```
+
+### Turnovers
+```{r l}
+ggplotly(ggplot(nba, aes(x = TOV, y = `Win or Loss`)) +
+  geom_point(aes(color = WL), position = position_jitter(height = 0.03, width = 0)) +
+  geom_smooth(method = "glm", method.args = list(family="binomial")) +
+  scale_color_manual(name = "Win or Loss", values = c("#861F41", "#E87722")) +
+  labs(title = "Logistic Regression Fit to Wins by Turnovers",
+       x = "Turnovers",
+       y = "P(Win)") +
+  theme_bw())
+```
+
+
+
+
+
+Multiple Linear Regression
+=====================================
+Column {data-width=1000}
+-----------------------------------------------------------------------
+
+### Model Selection
+
+For multiple linear regression the problem I was trying to answer is what is the best model for predicting the +/- (Plus/Minus) a team had based on their other box score stats. First I will use model selection to attempt to find the most precise model, and then I will analyze the results of that model and assess the accuracy when predicting the number of rebounds of the game. 
+
+
+
+```{r}
+nba_dat = read_xlsx("/Users/Adam/Downloads/4214_data.xlsx")
+names(nba_dat)[4] = "WL"
+nba_dat$WL = c("W" = 1, "L" = 0)[nba_dat$WL]
+
+nba_clean = nba_dat[,4:23]
+nba_clean = nba_clean[,-2]
+
+nba_clean = nba_clean[,-13] # removing DREB since it is highly correlated w REB
+nba_clean = nba_clean[,-10] # removing FTA since correlation w FTM
+nba_clean = nba_clean[-1797,] 
+names(nba_clean)[10] = "FT_perc"
+names(nba_clean)[6] = "Three_PM"
+names(nba_clean)[7] = "Three_PA"
+names(nba_clean)[1] = "WL"
+names(nba_clean)[5] = "FG_perc"
+names(nba_clean)[8] = "Three_perc"
+```
+
+```{r}
+library(readxl)
+library(car)
+library(bestglm)
+nba2 = read_xlsx("/Users/Adam/Downloads/4214_data.xlsx")
+
+df = cbind(pts = nba2$PTS, FGM = nba2$FGM, FGA = nba2$FGA, FGP = nba2$`FG%`, 
+           TPM = nba2$`3PM`, TPA =  nba2$`3PA`, TPP =  nba2$`3P%`, FTM = nba2$FTM,
+           FTA=nba2$FTA, FTP=nba2$`FT%`, OREB=nba2$OREB, DREB=nba2$DREB, REB=nba2$REB,
+           AST=nba2$AST, STL=nba2$STL, BLK=nba2$BLK, TOV=nba2$TOV, PF=nba2$PF, 
+           PM=nba2$`+/-`)
+df = as.data.frame(df)
+
+
+df = df[,-2] #removing FGM
+df = df[,-8] # removing FTA
+df = df[,-10] # removing DREB
+bestglm(df, IC = "AIC", method = "exhaustive")
+
+best_mod = lm(`+/-` ~ PTS + FGA + `3P%` + FTM + `FT%` + OREB + REB + AST + STL + 
+                BLK + TOV + PF, data = nba2)
+
+```
+Once again, I am attempting to use the information from these NBA box statistics to accurately predict the +/- of the game. The +/- (plus minus) is an integer that is the total number of points a team scored minus the total number the opponent scored. It will be negative if the team lost, and positive if the team won. I had to remove FGM, FTA, and DREB, as there was multicolinearity present with these and other variables. I decided to do best subsets approach for my variable selection for my model. Using AIC as my information criterion I was left with a model that included more variables than I expected. The model I got was +/- = PTS + FGA + 3P% + FTM + FT% + OREB + REB + AST + STL + BLK + TOV + PF. All of the variables in this model were statistically significant. The model with coefficients (rounded to the 10 thousandth) is +/- = -42.0838 + 0.7860 * PTS - 1.3189 * FGA + 0.0890 * 3P% - 0.8629 * FTM + 0.1916 * FT% - 0.1314 * OREB + 1.5264 * REB + 0.0924 * AST + 1.4931 * STL + 0.3754 * BLK - 1.1974 * TOV + 0.1303 * PF. One interesting thing I noticed was that rebounds had the largest coefficient, which surprised me. I thought it would be points but maybe since there are more points than rebounds in a game that rebounds had a larger estimated coefficient. The adjusted R-squared of this model was 0.7313 or that 73.13% of the variability of the plus minus can be explained by this model. Now we can continue on with checking our assumptions for multiple variable linear regression. These values can be shown in the coefficient plot on the right hand side, which has the coefficient, as well as a confidence interval for that variable's optimal coefficient.
+
+Row
+-----------------------------------------------------------------------
+### Coefficients Plot
+```{r fig.width = 9, fig.height= 7}
+plot_model(best_mod, title = "Coefficients Value and CI of Model")
+```
+
+We can see that when deciding a teams +/- we have rebounds and steals as the two most important variables. Intuitively this makes sense, as when you rebound the ball, you ensure another possession, whether the opposing team missed a shot or your team did. Furthermore, when your team gets a steal, you ensure another possession, which can explain the large coefficients found for both variables. One thing I found very surprising was that Field Goals Attempted (FGA) has the lowest estimated coefficient, at a value of -1.32. This can be explained by the model accounting for teams that are just chucking up shots (volume over quality), which is why points has a positive coefficient, so if you shoot you get penalized but if the shot goes in it counteracts the penalty. Finally, the second lowest estimated coefficient is for turnovers (TOV) as the opposite of steals, you ensuring that you lost a possession. 
+
+
+
+
+
+
+Ridge Regression 
+=====================================
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+### Ridge Regression
+
+The question I sought to answer is "How accurately can we predict wins and losses based on the box score variables?".
+
+I determined which variables to use using stepAIC and other model selection tools leading us to use points, 3 point makes, defensive rebounds, steals, blocks, and turnovers to predict if a team had won or lost.
+
+Win or Loss ~ PTS + 3PM + DREB + STL + BLK + TOV
+
+I used a randomized 80/20 split between training and testing data giving 1979 training observations and 481 testing observations. This split can be seen in the table on the right where we have a small subset of the testing observations with the prediction and actual result. Also shown are some game details and the variables I used to make my predictions. One thing to keep in mind is that each observation is only one teams perspective and that the opposing team's perspective is recoded in a seperate row. An example of this is with rows 21 and 22, shown on the right, where the Detroit Pistons lost the Philidelphia 76ers in Philly on 4/10/22. 
+
+### Confusion Matrix
+
+```{r ridge_regression}
+library(MASS)
+library(glmnet)
+library(dplyr)
+model <- glmnet(model.matrix(`Win or Loss` ~ PTS + `3PM` + DREB + STL + BLK + TOV, data = nba), data.matrix(nba$`Win or Loss`))
+
+
+set.seed(1)
+trainIndex <- createDataPartition(nba$Team, p = 0.8, list = FALSE)
+nba$`Win or Loss` <- factor(nba$`Win or Loss`, levels = unique(nba$`Win or Loss`))
+train <- nba[trainIndex, ]
+test <- nba[-trainIndex, ]
+
+x <- test[, c("Win or Loss", "PTS", "3PM", "DREB", "STL", "BLK", "TOV")] %>% data.matrix()
+
+
+preds <- predict(model, newdata = test, newx = x, type = "response")
+pred_categories <- ifelse(preds > 0.5, 1, 0)[,61]
+
+uh <- data.frame(test[,c(1,2,3,6,10,17,20,21,22)], "Actual Result" = test[,4], "Predicted Result" = pred_categories)
+uh$Predicted.Result <- as.factor(uh$Predicted.Result)
+as.table(confusionMatrix(uh$Predicted.Result, test$`Win or Loss`))
+```
+
+As you can see with the confusion matrix above, our model is about 77% accurate at predicting a win or a loss from the variables discussed with out-of-sample testing. This is an amazing accuracy for the situation since all of these variables are highly dependent on the pace of the game. For example, it is hard to use only these variables to make predictions for both a slow-paced team and a fast-paced team. 
+
+Column
+-----------------------------------------------------------------------
+### Predictions
+```{r Predictions_ridge}
+
+
+kable(uh[1:20,], align = "r") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+```
+
+
+
+Natural Cubic Splines
+=====================================
+
+Column
+-----------------------------------------------------------------------
+For my natural cubic splines methodology I am trying to find the degree of freedom (DF) that minimizes the in sample sum of squares error. U will be using a response variable of win or loss with points as the predictor. After I find the best fit natural cubic splines we will then work on finding the best natural cubic splines on the out of sample SSE or the testing data set. 
+```{r include = FALSE}
+SSE = rep(0,8)
+# Splitting training and testing data
+nba_clean$WL = as.numeric(nba_clean$WL)
+nba_train = nba_clean[1:1800,]
+nba_test = nba_clean[1800:2460,]
+
+for (i in 1:9){
+  ns = lm(WL ~ ns(PTS, df = i), data = nba_train)
+  pred.ns <- predict(ns, newdata = data.frame(PTS = nba_train$PTS), se = T)
+  SSE[i] = sum((pred.ns$fit - nba_train$WL)**2)
+}
+
+dfs = (1:9)
+dfSSE = cbind(dfs, SSE)
+mat = data.frame(dfs, SSE)
+mat
+```
+```{r}
+print(mat)
+#ggplot(data = mat, aes(x = dfs, y = SSE)) + geom_point() +
+  #ggtitle("SSE of Sample1 Training versus Degrees of Freedom")
+```
+As we can see from both the data frame of DFs vs SSE and the plot of DFs vs SSE, the optimal number of degrees of freedom is 8 with a sum of squares error of 336.5399. Now we will plot the fit corresponding to 8 degrees of freedom. As we can see in the plot, increasing DF by generally decreases SSE. It appears to start to plateau and if we were to run with a higher max DF we would see that in the graph.
+
+```{r, fig.height= 4, fig.width=6, echo = FALSE}
+best.ns = lm(WL ~ ns(PTS, df = 8), data = nba_train)
+
+pred.ns <- predict(best.ns, newdata = data.frame(PTS = nba_train$PTS), 
+                    se = T)
+
+ggplot(nba_train, aes(x = PTS, y = WL))+geom_point(pch = 1, color = "gray") +
+  geom_line(data = data.frame(PTS = nba_train$PTS, sp = pred.ns$fit), 
+            aes(x = PTS, y = sp), color = "red") + 
+  ggtitle("Natrual Cubic Splines of NBA Training data with df = 8") +
+  geom_line(data = data.frame(PTS = nba_train$PTS, up = pred.ns$fit + 
+                                2*pred.ns$se.fit), aes(x = PTS, y = up),
+            linetype = 2) + 
+  geom_line(data = data.frame(PTS = nba_train$PTS, up = pred.ns$fit - 
+                                2*pred.ns$se.fit), aes(x = PTS, y = up),
+            linetype = 2) + 
+  geom_vline(xintercept = attributes(ns(nba_train$PTS, df = 8))$knots, linetype
+             = "dashed", color = "grey30")
+```
+
+As we can see from the natural cubic splines graph, we have a relationship between points scored and win or loss. As expected, the more points a team scores, the better chance they have of winning. The natural cubic splines has a much larger standard error towards the ends of the data set, as the accuracy is not nearly as low. This is due to the low number of data points at the ends of the points and in turn the model can not be as confident in its predictions. 
+
+Column
+-----------------------------------------------------------------------
+
+```{r, fig.height= 4, fig.width=6, echo = FALSE}
+SSEt = rep(0, 8)
+for (i in 1:9){
+  ns = lm(WL ~ ns(PTS, df = i), data = nba_train)
+  pred.ns <- predict(ns, newdata = data.frame(PTS = nba_test$PTS), se = T)
+  SSEt[i] = sum((pred.ns$fit[1:660] - nba_test$WL[1:660])**2)
+}
+
+mat1t = data.frame(dfs, SSEt)
+print(mat1t)
+
+#ggplot(data = mat1t, aes(x = dfs, y = SSEt)) + geom_point() +
+  #ggtitle("SSE of Sample1 Training versus Degrees of Freedom")
+```
+Now I am attempting to fit a natural cubic spline on the testing data set. I will see if we can minimize the sum of square error using the natural spline for the training data set. I am still using the same response, win or loss, and the same predictor, points. We can see from this graph of df versus SSE, that the optimal number of degrees of freedom is 4. This minimizes the sum of squares error to be 127.6512. This is far lower than the degree of freedom we got from the training data set which was 8, but the size of the data is smaller too.  
+```{r, fig.height= 4, fig.width=6, echo = FALSE}
+best.ns.t = lm(WL ~ ns(PTS, df = 4), data = nba_test)
+pred.ns.t <- predict(best.ns.t, newdata = data.frame(PTS = nba_test$PTS), 
+                    se = T)
+
+ggplot(nba_test, aes(x = PTS, y = WL))+geom_point(pch = 1, color = "gray") +
+  geom_line(data = data.frame(PTS = nba_test$PTS, sp = pred.ns.t$fit), 
+            aes(x = PTS, y = sp), color = "red") + 
+  ggtitle("Natrual Cubic Splines of NBA Testing data with df = 4") +
+  geom_line(data = data.frame(PTS = nba_test$PTS, up = pred.ns.t$fit + 
+                                2*pred.ns.t$se.fit), aes(x = PTS, y = up),
+            linetype = 2) + 
+  geom_line(data = data.frame(PTS = nba_test$PTS, up = pred.ns.t$fit - 
+                                2*pred.ns.t$se.fit), aes(x = PTS, y = up),
+            linetype = 2) + 
+  geom_vline(xintercept = attributes(ns(nba_test$PTS, df = 4))$knots, linetype 
+             = "dashed", color = "grey30")
+```
+
+We can see that knots are all close to the center, which means the different cubic polynomials are joined right around the middle, or the 98 - 115 point range. It appears to be linear in the middle and quadratic around the ends of the graph. This was suprising as I assumed that as the number of points increases the probability of winning would also increase. We can see that around the ends the spline starts to flare out as their is less data around these points. 
+
+
+
+
+K-Nearest Neighbors Classification
+=====================================
+Column
+-----------------------------------------------------------------------
+For K-Nearest Neighbors I will be attempting to predict if a team Wins or Losses based off the number of rebounds they secured, number of points scored, and turnovers. I will be converting Wins or Losses into a factor to enable KNN to be a classification to predict if the team won or lost based off points, rebounds and turnovers. Then we will be comparing this to a prediction using all the variables. 
+
+```{r, echo = FALSE}
+set.seed(0)
+nba_clean$WL = as.factor(nba_clean$WL)
+index <- sample(1:nrow(nba_clean), round(nrow(nba_clean) * 0.7))
+training_df <- nba_clean[index, ]
+testing_df <- nba_clean[-index, ]
+
+train_classes <- training_df$WL
+test_classes <- testing_df$WL
+
+train_features <- data.frame(cbind(training_df[2], training_df[12], training_df[16]))
+test_features <- data.frame(cbind(testing_df[2], testing_df[12], testing_df[16]))
+
+
+knn_classes <- knn(train = train_features, test = test_features, 
+                        cl = train_classes, k = 5)
+
+CrossTable(x = knn_classes, y = test_classes, prop.chisq = FALSE, 
+           prop.t = F, prop.r = F)
+
+confusionMatrix(knn_classes, test_classes)
+```
+When using rebounds, points, and turnovers as features for predicting if the team won or lost that game, I got the cross table displayed. If you look in the top left corner you can see how accurate K-nearest neighbors was at predicting if the team lost. I can see that they correctly predicted it 254 times out of 351 games. This means it was 72.4% accurate at predicting if the team lost or not. If you look at the second diagonal you can see the number of times KNN predicted correctly if the team won or not. It did so 280 times out of 387 games total, which comes out to approximately 72.4% accurate. Now we will try to predict the same thing but we will use all of the variables in our data. The overall accuracy equation is Sum(DIAG)/Sum(Everything) which equals (250 + 287)/(250 + 287 + 99 + 102) = 0.7276423, which is what we got from the confusion matrix. 
+
+Column
+-----------------------------------------------------------------------
+### Using all variables
+```{r, echo = FALSE}
+set.seed(0)
+train_features_all <- data.frame(training_df[2:17])
+test_features_all <- data.frame(testing_df[2:17])
+
+knn_classes_all <- knn(train = train_features_all, test = test_features_all, 
+                        cl = train_classes, k = 10)
+
+CrossTable(x = knn_classes_all, y = test_classes, prop.chisq = FALSE,
+           prop.t = F, prop.r = F)
+
+confusionMatrix(knn_classes_all, test_classes)
+```
+When I conducted K-Nearest Neighbors using all relevant variables, we get the cross table and the confusion matrix displayed above. When trying to predict on the 738 testing observation the model correctly predict 299 losses and 265 wins. To get the overall accuracy I can add these together and divide by the total, (299 + 265)/738 = 76.42276%. This is the same accuracy value we got from the confusionMatrix just below the cross table. There were a total of 352 losses and 386 wins in the testing data. This means that we predicted the losses 299/352 = 84.9% of the time and the wins 265/286 = 68.7% of the time. The error rate or (1 - accuracy) was 0.2358 or 23.58% of the predictions were incorrect.
+
+
+
+
+
+Naive Bayes
+=====================================
+Column {data-width=500}
+-----------------------------------------------------------------------
+### Naive Bayes
+
+Part of the reason I chose this dataset is to see if we could use Naive Bayes Classification to predict a team based on their statistics. I attempted to do so, but Naive Bayes was not able to predict teams with any degree of accuracy. Because of this, I switched the area of focus to predicting wins and losses based on a subset of important statistics. 
+
+The question I sought to answer is "How accurately can we predict wins and losses based on the box score variables?". I am particularly interested in if Naive Bayes is more accurate than Ridge Regression and K-Nearest Neighbors which I did similar predictions with. 
+
+I determined which variables to use using stepAIC and other model selection tools leading us to use points, 3 point makes, defensive rebounds, steals, blocks, and turnovers to predict if a team had won or lost.
+
+Win or Loss ~ PTS + 3PM + DREB + STL + BLK + TOV
+
+I used a randomized 80/20 split between training and testing data giving 1979 training observations and 481 testing observations. This split can be seen in the table on the right where we have a small subset of the testing observations with the prediction and actual result. Also shown are some game details and the variables we used to make our prediction.
+
+### Confusion Matrix
+```{r Naive_Bayes_Confusion}
+library(e1071)
+
+model <- naiveBayes(`Win or Loss` ~ PTS + `3PM` + DREB + STL + BLK + TOV, data = nba)
+
+
+library(caret)
+set.seed(1)
+trainIndex <- createDataPartition(nba$Team, p = 0.8, list = FALSE)
+nba$`Win or Loss` <- factor(nba$`Win or Loss`, levels = unique(nba$`Win or Loss`))
+train <- nba[trainIndex, ]
+test <- nba[-trainIndex, ]
+
+
+preds <- predict(model, newdata = test)
+uh <- data.frame(test[,c(1,2,3,6,10,17,20,21,22)], "Actual Result" = test[,4], "Predicted Result" = preds)
+
+as.table(confusionMatrix(preds, test$`Win or Loss`))
+
+```
+As you can see with the confusion matrix above, my model is about 75% accurate at predicting a win or a loss from the variables discussed with out-of-sample testing. The out-of-sample prediction accuracy using Ridge Regression was about 77%, so Naive Bayes was slightly worse in this case. 75% is still a fantastic rate given the circumstances. 
+
+Column
+-----------------------------------------------------------------------
+### Predictions
+```{r Predictions}
+
+
+kable(uh[1:20,], align = "r") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+```
+
+
